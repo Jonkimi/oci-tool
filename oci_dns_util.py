@@ -2,6 +2,11 @@ from abc import abstractmethod
 
 
 class OciPublicIpUtil:
+
+    @abstractmethod
+    def get_private_ip_by_id(self) -> tuple[bool, dict]:
+        pass
+
     @abstractmethod
     def get_public_ip_by_private_ip_id(self) -> tuple[bool, dict]:
         pass

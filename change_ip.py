@@ -4,6 +4,7 @@ import oci_dns_cli
 import oci_dns_api
 import cf_dns_api
 import oci_dns_util
+import time
 
 
 DEBUG = False
@@ -26,9 +27,10 @@ def recreate_public_ip(
     cf_client = cf_dns_api.get_client_from_env()
     try_count = 0
     while try_count < retry_count:
-        success, result = oci_dns_util.delete_public_ip()
+        success, ip_address = oci_dns_util.delete_public_ip()
         if success:
-            print(f"Delete public ip Success")
+            print(f"Delete public ip {ip_address} Success")
+            time.sleep(30)
             # create public ip
             success, result = oci_dns_util.create_public_ip()
             if success:
@@ -36,7 +38,9 @@ def recreate_public_ip(
                 new_ip_address = result["ip-address"]
                 new_display_name = result["display-name"]
                 if new_ip_address != ip_address:
-                    print(f"Create new ip {new_ip_address} {new_display_name} {new_public_ip_id}")
+                    print(
+                        f"Create new ip {new_ip_address} {new_display_name} {new_public_ip_id}"
+                    )
                     # save "ip_address display_name" to file ip.txt
                     save_ip(new_ip_address, new_display_name, dry_run)
 
@@ -56,6 +60,10 @@ def recreate_public_ip(
         try_count += 1
         if try_count > 0 and try_count <= retry_count:
             print(f"try count: {try_count}")
+            time.sleep(120)
+        else:
+            print("Max try count reached, exit")
+            break
 
 
 if __name__ == "__main__":
@@ -64,6 +72,7 @@ if __name__ == "__main__":
     DEBUG = get_debug_mode()
     RECREATE = get_recreate_mode()
     PROXY = get_proxy()
+    FORCE = False
 
     if PROXY:
         print(f"using proxy: {PROXY}")
@@ -74,6 +83,7 @@ if __name__ == "__main__":
     # -c --create  recreate public ip
     # -r --retry-count  recreate try count, default 5
     # -l --loss-rate package loss rate threshold, default 30
+    # -f --force  force recreate
     # --dry-run  dry run mode
 
     import argparse
@@ -86,7 +96,9 @@ if __name__ == "__main__":
         dest="skip_check",
         help="enable skipping check ip is good or not at startup",
     )
-    parser.add_argument("-d", "--debug", action="store_true", dest="debug", help="enable debug print")
+    parser.add_argument(
+        "-d", "--debug", action="store_true", dest="debug", help="enable debug print"
+    )
     parser.add_argument(
         "-c",
         "--create",
@@ -113,7 +125,13 @@ if __name__ == "__main__":
         help="package loss rate threshold of ip ping test, default value is 30(%%)",
     )
 
-    parser.add_argument("--dry-run", action="store_true", dest="dry_run", help="dry run")
+    parser.add_argument(
+        "-f", "--force", action="store_true", dest="force", help="force recreate"
+    )
+
+    parser.add_argument(
+        "--dry-run", action="store_true", dest="dry_run", help="dry run"
+    )
 
     args = parser.parse_args()
 
@@ -131,8 +149,14 @@ if __name__ == "__main__":
     if args.create:
         os.environ["RECREATE"] = "True"
         RECREATE = True
-        if skip_check:
-            print(f"-s/--skip-check is disabled by -c/--create")
+        # if skip_check:
+        #     print(f"-s/--skip-check is disabled by -c/--create")
+
+    if args.force:
+        os.environ["RECREATE"] = "True"
+        RECREATE = True
+        FORCE = True
+        print("force recreate")
 
     retry_count = 5
     if args.retry_count:
@@ -151,29 +175,49 @@ if __name__ == "__main__":
     else:
         oci_dns_util = oci_dns_api.OciPublicIpApiUtil(private_ip_id)
 
+    oci_dns_util.get_private_ip_by_id()
+    time.sleep(10)
     success, result = oci_dns_util.get_public_ip_by_private_ip_id()
     if success:
-        public_ip_id = result["id"]
-        ip_address = result["ip-address"]
-        display_name = result["display-name"]
-        compartment_id = result["compartment-id"]
-        print(f"current public ip: {ip_address} {display_name}")
-        recreate_flag = False
+        if result:
+            public_ip_id = result["id"]
+            ip_address = result["ip-address"]
+            display_name = result["display-name"]
+            compartment_id = result["compartment-id"]
+            print(f"current public ip: {ip_address} {display_name}")
+            recreate_flag = False
 
-        if RECREATE:
-            if not is_good_ip(ip_address, loss_rate, dry_run=args.dry_run):
-                print(f"current ip {ip_address} is bad, try to recreate")
-                recreate_flag = True
+            if RECREATE:
+                if not skip_check and not is_good_ip(
+                    ip_address, loss_rate, dry_run=args.dry_run
+                ):
+                    print(f"current ip {ip_address} is bad, try to recreate")
+                    recreate_flag = True
+                else:
+                    if FORCE:
+                        recreate_flag = True
+                    else:
+                        print(f"skip recreate good ip {ip_address}")
+
             else:
-                print(f"skip recreate good ip {ip_address}")
+                if skip_check:
+                    print(f"skip check ip {ip_address}")
+                elif not skip_check and not is_good_ip(
+                    ip_address, loss_rate, dry_run=args.dry_run
+                ):
+                    print(f"current ip {ip_address} is bad, but skipping recreate")
+
+            if recreate_flag:
+
+                recreate_public_ip(
+                    oci_dns_util,
+                    loss_rate,
+                    retry_count,
+                    args.dry_run,
+                )
+
         else:
-            if skip_check:
-                print(f"skip check ip {ip_address}")
-            elif not skip_check and not is_good_ip(ip_address, loss_rate, dry_run=args.dry_run):
-                print(f"current ip {ip_address} is bad, but skipping recreate")
-
-        if recreate_flag:
-
+            print("no public ip")
             recreate_public_ip(
                 oci_dns_util,
                 loss_rate,

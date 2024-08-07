@@ -60,7 +60,11 @@ def ping_test(host, count=4, timeout=2):
     packet_loss_rate = float(re.search(r"(\d+\.\d+)% packet loss", output).group(1))
 
     # 提取平均往返时间
-    average_rtt = float(re.search(r" = \d+\.\d+/(\d+\.\d+)/", output).group(1))
+    match = re.search(r" = \d+\.\d+/(\d+\.\d+)/", output)
+    if match is not None:
+        average_rtt = float(match.group(1))
+    else:
+        average_rtt = 9999
 
     return packet_loss_rate, average_rtt
 
@@ -74,11 +78,11 @@ def is_good_ip(ip_address, loss_rate_threshold=30, dry_run=False):
         print(f"{ip_address} package loss: 0%, avg rtt: 0ms")
         print(f"{ip_address} is good ip")
         return True
-    packet_loss_rate, average_rtt = ping_test(ip_address, 20)
+    packet_loss_rate, average_rtt = ping_test(ip_address, 25)
 
     print(f"{ip_address} package loss: {packet_loss_rate}%, avg rtt: {average_rtt}ms")
 
-    if packet_loss_rate > loss_rate_threshold:
+    if packet_loss_rate > loss_rate_threshold or average_rtt > 1000:
         print(f"{ip_address} is bad ip")
         return False
     return True
@@ -95,4 +99,6 @@ def replace_underscore_with_dash(input_dict):
     for key, value in input_dict.items():
         new_key = key.replace("_", "-")
         new_dict[new_key] = value
+    if get_debug_mode():
+        print("replace_underscore_with_dash", new_dict)
     return new_dict
