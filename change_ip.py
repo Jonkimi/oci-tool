@@ -14,23 +14,24 @@ PROXY = None
 def save_ip(ip_address, display_name, dry_run=False):
     if dry_run:
         return
-    with open("ip.txt", "w") as f:
-        f.write(f"{ip_address} {display_name}")
+    # write new line to ip.txt
+    with open("ip.txt", "a") as f:
+        f.write(f"\r\n{ip_address} {display_name}")
 
 
 def recreate_public_ip(
     oci_dns_util: oci_dns_api.OciPublicIpUtil,
-    loss_rate,
+    loss_rate_threshold,
     retry_count,
     dry_run,
 ):
     cf_client = cf_dns_api.get_client_from_env()
     try_count = 0
-    while try_count < retry_count:
+    while try_count <= retry_count:
         success, ip_address = oci_dns_util.delete_public_ip()
         if success:
             print(f"Delete public ip {ip_address} Success")
-            time.sleep(30)
+            time.sleep(30 + try_count * 10)
             # create public ip
             success, result = oci_dns_util.create_public_ip()
             if success:
@@ -43,8 +44,9 @@ def recreate_public_ip(
                     )
                     # save "ip_address display_name" to file ip.txt
                     save_ip(new_ip_address, new_display_name, dry_run)
-
-                    if is_good_ip(new_ip_address, loss_rate):
+                    # wait 15s for new ip to be ready
+                    time.sleep(15)
+                    if is_good_ip(new_ip_address, loss_rate_threshold):
                         print(f"good ip {new_ip_address}, update to cloudflare")
                         cf_dns_api.update_cf_ip(cf_client, new_ip_address)
                         break
@@ -60,7 +62,7 @@ def recreate_public_ip(
         try_count += 1
         if try_count > 0 and try_count <= retry_count:
             print(f"try count: {try_count}")
-            time.sleep(120)
+            time.sleep(120 + try_count * 30)
         else:
             print("Max try count reached, exit")
             break
