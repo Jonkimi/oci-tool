@@ -219,13 +219,16 @@ if __name__ == "__main__":
                 )
 
         else:
-            print("no public ip")
-            recreate_public_ip(
-                oci_dns_util,
-                loss_rate,
-                retry_count,
-                args.dry_run,
-            )
+            print("no public ip, skip test ip")
+            if RECREATE:
+                recreate_public_ip(
+                    oci_dns_util,
+                    loss_rate,
+                    retry_count,
+                    args.dry_run,
+                )
+            else:
+                print("no create flag,skip recreate")
 
     else:
         print("get public ip failed")
